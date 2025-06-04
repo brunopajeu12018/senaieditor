@@ -3,6 +3,7 @@
 <PageTitle>Home</PageTitle>
 
 @using System.ComponentModel.DataAnnotations
+@using Microsoft.AspNetCore.Components.Web
 
 <style>
     .login-container {
@@ -71,7 +72,7 @@
         text-decoration: underline;
         font-size: 0.95em;
     }
-    /* Mantém o restante do seu CSS para o dashboard */
+
     .dashboard-container {
         min-height: 100vh;
         background-color: #f0f0f0;
@@ -129,6 +130,27 @@
         border-radius: 8px;
         text-align: left;
     }
+
+    .modal-bg {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100vw;
+        height: 100vh;
+        background: rgba(0,0,0,0.4);
+        z-index: 1000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .modal-content {
+        background: white;
+        padding: 30px;
+        border-radius: 10px;
+        max-width: 400px;
+        text-align: center;
+    }
 </style>
 
 @if (!isLoggedIn) {
@@ -158,20 +180,40 @@ else {
             <h2>Bem-vindo, @editor.Nome!</h2>
             <div class="dashboard-cards">
                 <div class="dashboard-card">
-                    <strong>@docentes.Count</strong>
+                    <strong>@docentesFiltrados.Count</strong>
                     <div>Docentes Gerenciados</div>
                 </div>
                 <div class="dashboard-card">
-                    <strong>2</strong>
-                    <div>Solicitações Pendentes</div>
-                </div>
-                <div class="dashboard-card">
-                    <strong>1</strong>
+                    <strong>@notificacoes.Count</strong>
                     <div>Notificações</div>
                 </div>
             </div>
 
             <h4>Docentes Gerenciados</h4>
+
+            <!-- Filtro de pesquisa -->
+            <input class="form-control mb-2" placeholder="Pesquisar por nome ou matrícula..." @bind="filtroDocente" @bind:event="oninput" />
+
+            <!-- Adicionar docente -->
+            <EditForm Model="@novoDocente" OnValidSubmit="AdicionarDocente">
+                <DataAnnotationsValidator />
+                <div class="d-flex mb-2" style="gap:8px;">
+                    <InputText class="form-control" placeholder="Matrícula" @bind-Value="novoDocente.Matricula" />
+                    <InputText class="form-control" placeholder="Nome" @bind-Value="novoDocente.Nome" />
+                    <button type="submit" class="btn btn-primary">Adicionar</button>
+                </div>
+                <ValidationMessage For="@(() => novoDocente.Matricula)" />
+                <ValidationMessage For="@(() => novoDocente.Nome)" />
+            </EditForm>
+            @if (!string.IsNullOrEmpty(mensagemDocente)) {
+                <div class="alert alert-danger mt-2">@mensagemDocente</div>
+            }
+
+            <button class="btn btn-outline-success mb-2" @onclick="ExportarDocentesCsv">Exportar CSV</button>
+            @if (!string.IsNullOrEmpty(csvDownloadUrl)) {
+                <a href="@csvDownloadUrl" download="@csvFileName" class="btn btn-link mb-2">Clique aqui para baixar o CSV</a>
+            }
+
             <table class="docentes-table">
                 <thead>
                     <tr>
@@ -181,12 +223,12 @@ else {
                     </tr>
                 </thead>
                 <tbody>
-                    @foreach (var d in docentes) {
+                    @foreach (var d in docentesFiltrados) {
                         <tr>
                             <td>@d.Matricula</td>
                             <td>
                                 @if (editandoDocente == d) {
-                                    <InputText class="form-control" @bind-Value="editandoNome" />
+                                    <InputText class="form-control" @bind-Value="editandoNome" @onkeydown="HandleEditKeyDown" />
                                 }
                                 else {
                                     @d.Nome
@@ -199,7 +241,7 @@ else {
                                 }
                                 else {
                                     <button class="btn btn-sm btn-warning" @onclick="() => EditarDocente(d)">Editar</button>
-                                    <button class="btn btn-sm btn-danger" @onclick="() => RemoverDocente(d)">Remover</button>
+                                    <button class="btn btn-sm btn-danger" @onclick="() => ConfirmarRemocaoDocente(d)">Remover</button>
                                 }
                             </td>
                         </tr>
@@ -209,10 +251,43 @@ else {
 
             <div class="profile-section">
                 <h5>Perfil do Editor</h5>
-                <div><b>Matrícula:</b> @editor.Matricula</div>
-                <div><b>Nome:</b> @editor.Nome</div>
-                <button class="btn btn-secondary mt-2" @onclick="EditarPerfil">Editar Perfil</button>
-                <button class="btn btn-outline-primary mt-2" @onclick="Logout">Sair</button>
+                @if (editandoPerfil) {
+                    <EditForm Model="@editorEdicao" OnValidSubmit="SalvarPerfil">
+                        <DataAnnotationsValidator />
+                        <div>
+                            <label>Matrícula:</label>
+                            <InputText class="form-control mb-1" @bind-Value="editorEdicao.Matricula" />
+                            <ValidationMessage For="@(() => editorEdicao.Matricula)" />
+                        </div>
+                        <div>
+                            <label>Nome:</label>
+                            <InputText class="form-control mb-1" @bind-Value="editorEdicao.Nome" />
+                            <ValidationMessage For="@(() => editorEdicao.Nome)" />
+                        </div>
+                        <button class="btn btn-success mt-2" type="submit">Salvar</button>
+                        <button class="btn btn-secondary mt-2" type="button" @onclick="CancelarEdicaoPerfil">Cancelar</button>
+                    </EditForm>
+                }
+                else {
+                    <div><b>Matrícula:</b> @editor.Matricula</div>
+                    <div><b>Nome:</b> @editor.Nome</div>
+                    <button class="btn btn-secondary mt-2" @onclick="EditarPerfil">Editar Perfil</button>
+                    <button class="btn btn-outline-primary mt-2" @onclick="Logout">Sair</button>
+                }
+            </div>
+
+            <div class="mt-3">
+                <h5>Notificações</h5>
+                @if (notificacoes.Count == 0) {
+                    <div class="text-muted">Nenhuma notificação.</div>
+                }
+                else {
+                    <ul>
+                        @foreach (var n in notificacoes) {
+                            <li>@n</li>
+                        }
+                    </ul>
+                }
             </div>
 
             <a href="#" class="support-link" @onclick="MostrarAjuda">Ajuda e Suporte</a>
@@ -221,11 +296,22 @@ else {
 }
 
 @if (mostrarAjuda) {
-    <div style="position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.4);z-index:1000;display:flex;align-items:center;justify-content:center;">
-        <div style="background:white;padding:30px;border-radius:10px;max-width:400px;text-align:center;">
+    <div class="modal-bg">
+        <div class="modal-content">
             <h4>Ajuda e Suporte</h4>
             <p>Para dúvidas ou problemas, entre em contato com o suporte do sistema pelo e-mail <b>suporte@senai.com.br</b> ou procure a coordenação.</p>
             <button class="btn btn-primary" @onclick="() => mostrarAjuda = false">Fechar</button>
+        </div>
+    </div>
+}
+
+@if (mostrarConfirmacaoRemocao && docenteParaRemover != null) {
+    <div class="modal-bg">
+        <div class="modal-content">
+            <h5>Confirmação</h5>
+            <p>Tem certeza que deseja remover o docente <b>@docenteParaRemover.Nome</b>?</p>
+            <button class="btn btn-danger me-2" @onclick="RemoverDocenteConfirmado">Remover</button>
+            <button class="btn btn-secondary" @onclick="CancelarRemocaoDocente">Cancelar</button>
         </div>
     </div>
 }
@@ -236,8 +322,13 @@ else {
     private string? loginMensagem;
     private bool mostrarAjuda = false;
 
+    // Notificações dinâmicas
+    private List<string> notificacoes = new() { "Bem-vindo ao sistema!", "Lembre-se de atualizar seus dados." };
+
     // Editor (usuário logado)
     private EditorModel editor = new();
+    private EditorModel editorEdicao = new();
+    private bool editandoPerfil = false;
 
     // Lista simulada de docentes gerenciados
     private List<DocenteModel> docentes = new()
@@ -246,9 +337,42 @@ else {
         new DocenteModel { Matricula = "67890", Nome = "João Souza" }
     };
 
+    // Filtro de pesquisa
+    private string filtroDocente = "";
+
+    // Adicionar docente
+    private DocenteModel novoDocente = new();
+    private string? mensagemDocente;
+
     // Variáveis para edição inline
     private DocenteModel? editandoDocente;
     private string? editandoNome;
+
+    // Confirmação de remoção
+    private bool mostrarConfirmacaoRemocao = false;
+    private DocenteModel? docenteParaRemover;
+
+    // Exportação CSV
+    private string? csvDownloadUrl;
+    private string? csvFileName;
+
+    private void ExportarDocentesCsv() {
+        var csv = "Matrícula,Nome\n" +
+            string.Join("\n", docentesFiltrados.Select(d => $"\"{d.Matricula}\",\"{d.Nome}\""));
+        var bytes = System.Text.Encoding.UTF8.GetBytes(csv);
+        var base64 = Convert.ToBase64String(bytes);
+        csvDownloadUrl = $"data:text/csv;base64,{base64}";
+        csvFileName = $"docentes_{DateTime.Now:yyyyMMdd_HHmmss}.csv";
+    }
+
+    // Propriedade para docentes filtrados
+    private List<DocenteModel> docentesFiltrados =>
+        string.IsNullOrWhiteSpace(filtroDocente)
+            ? docentes
+            : docentes.Where(d =>
+                (!string.IsNullOrEmpty(d.Nome) && d.Nome.Contains(filtroDocente, StringComparison.OrdinalIgnoreCase)) ||
+                (!string.IsNullOrEmpty(d.Matricula) && d.Matricula.Contains(filtroDocente, StringComparison.OrdinalIgnoreCase))
+            ).ToList();
 
     // Login/registro simulado
     private void Entrar() {
@@ -263,6 +387,8 @@ else {
     private void Logout() {
         isLoggedIn = false;
         editor = new();
+        editorEdicao = new();
+        editandoPerfil = false;
         loginMensagem = string.Empty;
     }
 
@@ -270,8 +396,39 @@ else {
         mostrarAjuda = true;
     }
 
+    // Edição de perfil
     private void EditarPerfil() {
-        mostrarAjuda = true; // Exemplo: mostra ajuda como placeholder
+        editorEdicao = new EditorModel { Matricula = editor.Matricula, Nome = editor.Nome };
+        editandoPerfil = true;
+    }
+
+    private void SalvarPerfil() {
+        if (!string.IsNullOrWhiteSpace(editorEdicao.Matricula) && !string.IsNullOrWhiteSpace(editorEdicao.Nome)) {
+            editor.Matricula = editorEdicao.Matricula;
+            editor.Nome = editorEdicao.Nome;
+            notificacoes.Add("Perfil atualizado com sucesso.");
+            editandoPerfil = false;
+        }
+    }
+
+    private void CancelarEdicaoPerfil() {
+        editandoPerfil = false;
+    }
+
+    // Adicionar docente
+    private void AdicionarDocente() {
+        mensagemDocente = string.Empty;
+        if (string.IsNullOrWhiteSpace(novoDocente.Matricula) || string.IsNullOrWhiteSpace(novoDocente.Nome)) {
+            mensagemDocente = "Preencha todos os campos para adicionar um docente.";
+            return;
+        }
+        if (docentes.Any(d => d.Matricula == novoDocente.Matricula)) {
+            mensagemDocente = "Já existe um docente com essa matrícula.";
+            return;
+        }
+        docentes.Add(new DocenteModel { Matricula = novoDocente.Matricula, Nome = novoDocente.Nome });
+        notificacoes.Add($"Docente {novoDocente.Nome} adicionado.");
+        novoDocente = new DocenteModel();
     }
 
     // Inicia edição do docente
@@ -284,6 +441,7 @@ else {
     private void SalvarEdicaoDocente() {
         if (editandoDocente != null && !string.IsNullOrWhiteSpace(editandoNome)) {
             editandoDocente.Nome = editandoNome;
+            notificacoes.Add($"Docente {editandoDocente.Matricula} atualizado.");
         }
         editandoDocente = null;
         editandoNome = null;
@@ -295,8 +453,32 @@ else {
         editandoNome = null;
     }
 
-    private void RemoverDocente(DocenteModel docente) {
-        docentes.Remove(docente);
+    // Edição inline: salvar com Enter, cancelar com Esc
+    private void HandleEditKeyDown(KeyboardEventArgs e) {
+        if (e.Key == "Enter")
+            SalvarEdicaoDocente();
+        else if (e.Key == "Escape")
+            CancelarEdicaoDocente();
+    }
+
+    // Confirmação de remoção
+    private void ConfirmarRemocaoDocente(DocenteModel docente) {
+        docenteParaRemover = docente;
+        mostrarConfirmacaoRemocao = true;
+    }
+
+    private void RemoverDocenteConfirmado() {
+        if (docenteParaRemover != null) {
+            notificacoes.Add($"Docente {docenteParaRemover.Nome} removido.");
+            docentes.Remove(docenteParaRemover);
+        }
+        mostrarConfirmacaoRemocao = false;
+        docenteParaRemover = null;
+    }
+
+    private void CancelarRemocaoDocente() {
+        mostrarConfirmacaoRemocao = false;
+        docenteParaRemover = null;
     }
 
     public class EditorModel {
@@ -308,7 +490,9 @@ else {
     }
 
     public class DocenteModel {
+        [Required(ErrorMessage = "A matrícula é obrigatória.")]
         public string? Matricula { get; set; }
+        [Required(ErrorMessage = "O nome é obrigatório.")]
         public string? Nome { get; set; }
     }
 }
